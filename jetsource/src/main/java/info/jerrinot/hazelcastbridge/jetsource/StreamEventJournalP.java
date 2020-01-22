@@ -16,14 +16,15 @@
 
 package info.jerrinot.hazelcastbridge.jetsource;
 
+import bridge.com.hazelcast.core.ICompletableFuture;
+import bridge.com.hazelcast.internal.journal.EventJournalInitialSubscriberState;
+import bridge.com.hazelcast.ringbuffer.ReadResultSet;
 import com.hazelcast.client.config.ClientConfig;
 import com.hazelcast.client.impl.clientside.HazelcastClientProxy;
 import com.hazelcast.cluster.Address;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.function.FunctionEx;
 import com.hazelcast.function.PredicateEx;
-import com.hazelcast.internal.journal.EventJournalInitialSubscriberState;
-import com.hazelcast.internal.journal.EventJournalReader;
 import com.hazelcast.jet.JetException;
 import com.hazelcast.jet.Traverser;
 import com.hazelcast.jet.Traversers;
@@ -39,7 +40,7 @@ import com.hazelcast.jet.core.processor.SourceProcessors;
 import com.hazelcast.jet.pipeline.JournalInitialPosition;
 import com.hazelcast.map.EventJournalMapEvent;
 import com.hazelcast.nio.serialization.HazelcastSerializationException;
-import com.hazelcast.ringbuffer.ReadResultSet;
+import hz3bridge.EventJournalReader;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -80,7 +81,7 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
     private static final int MAX_FETCH_SIZE = 128;
 
     @Nonnull
-    private final EventJournalReader<? extends E> eventJournalReader;
+    private final hz3bridge.EventJournalReader<T> eventJournalReader;
     @Nonnull
     private final Predicate<? super E> predicate;
     @Nonnull
@@ -100,7 +101,7 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
     @Nonnull
     private final long[] readOffsets;
 
-    private CompletableFuture<? extends ReadResultSet<? extends T>>[] readFutures;
+    private ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<? extends T>>[] readFutures;
 
     // currently processed resultSet, it's partitionId and iterating position
     @Nullable
@@ -112,7 +113,7 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
     private Traverser<Object> traverser = Traversers.empty();
 
     StreamEventJournalP(
-            @Nonnull EventJournalReader<? extends E> eventJournalReader,
+            @Nonnull hz3bridge.EventJournalReader<T> eventJournalReader,
             @Nonnull List<Integer> assignedPartitions,
             @Nonnull PredicateEx<? super E> predicateFn,
             @Nonnull FunctionEx<? super E, ? extends T> projectionFn,
@@ -146,7 +147,7 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
     @Override
     protected void init(@Nonnull Context context) throws Exception {
         @SuppressWarnings("unchecked")
-        CompletableFuture<EventJournalInitialSubscriberState>[] futures = new CompletableFuture[partitionIds.length];
+        ICompletableFuture<bridge.com.hazelcast.internal.journal.EventJournalInitialSubscriberState>[] futures = new ICompletableFuture[partitionIds.length];
         Arrays.setAll(futures, i -> eventJournalReader.subscribeToEventJournal(partitionIds[i]));
         for (int i = 0; i < futures.length; i++) {
             emitOffsets[i] = readOffsets[i] = getSequence(futures[i].get());
@@ -240,7 +241,7 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
 
     @SuppressWarnings("unchecked")
     private void initialRead() {
-        readFutures = new CompletableFuture[partitionIds.length];
+        readFutures = new ICompletableFuture[partitionIds.length];
         for (int i = 0; i < readFutures.length; i++) {
             readFutures[i] = readFromJournal(partitionIds[i], readOffsets[i]);
         }
@@ -252,7 +253,7 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
 
     private void tryGetNextResultSet() {
         while (resultSet == null && ++currentPartitionIndex < partitionIds.length) {
-            CompletableFuture<? extends ReadResultSet<? extends T>> future = readFutures[currentPartitionIndex];
+            ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<? extends T>> future = readFutures[currentPartitionIndex];
             if (!future.isDone()) {
                 continue;
             }
@@ -281,7 +282,7 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
         }
     }
 
-    private ReadResultSet<? extends T> toResultSet(CompletableFuture<? extends ReadResultSet<? extends T>> future) {
+    private bridge.com.hazelcast.ringbuffer.ReadResultSet<? extends T> toResultSet(ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<? extends T>> future) {
         try {
             return future.get();
         } catch (ExecutionException e) {
@@ -298,9 +299,8 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
         }
     }
 
-    private CompletableFuture<? extends ReadResultSet<? extends T>> readFromJournal(int partition, long offset) {
-        return eventJournalReader.readFromEventJournal(offset, 1, MAX_FETCH_SIZE, partition, predicate, projection)
-                                 .toCompletableFuture();
+    private ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<? extends T>> readFromJournal(int partition, long offset) {
+        return eventJournalReader.readFromEventJournal(offset, 1, MAX_FETCH_SIZE, partition);
     }
 
     private static class ClusterMetaSupplier<E, T> implements ProcessorMetaSupplier {
@@ -308,7 +308,7 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
         static final long serialVersionUID = 1L;
 
         private final String clientXml;
-        private final FunctionEx<? super HazelcastInstance, ? extends EventJournalReader<E>>
+        private final FunctionEx<String, hz3bridge.EventJournalReader<T>>
                 eventJournalReaderSupplier;
         private final PredicateEx<? super E> predicate;
         private final FunctionEx<? super E, ? extends T> projection;
@@ -319,15 +319,15 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
         private transient Map<Address, List<Integer>> addrToPartitions;
 
         ClusterMetaSupplier(
-                @Nullable ClientConfig clientConfig,
-                @Nonnull FunctionEx<? super HazelcastInstance, ? extends EventJournalReader<E>>
+                @Nullable String clientConfigXml,
+                @Nonnull FunctionEx<String, hz3bridge.EventJournalReader<T>>
                         eventJournalReaderSupplier,
                 @Nonnull PredicateEx<? super E> predicate,
                 @Nonnull FunctionEx<? super E, ? extends T> projection,
                 @Nonnull JournalInitialPosition initialPos,
                 @Nonnull EventTimePolicy<? super T> eventTimePolicy
         ) {
-            this.clientXml = asXmlString(clientConfig);
+            this.clientXml = clientConfigXml;
             this.eventJournalReaderSupplier = eventJournalReaderSupplier;
             this.predicate = predicate;
             this.projection = projection;
@@ -343,14 +343,12 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
         @Override
         public void init(@Nonnull Context context) {
             assert clientXml != null;
-            HazelcastInstance client = newHazelcastClient(asClientConfig(clientXml));
+            hz3bridge.EventJournalReader reader = eventJournalReaderSupplier.apply(clientXml);
             try {
-                HazelcastClientProxy clientProxy = (HazelcastClientProxy) client;
-                remotePartitionCount = clientProxy.client.getClientPartitionService().getPartitionCount();
+                remotePartitionCount = reader.getPartitionCount();
             } finally {
-                client.shutdown();
+                reader.shutdown();
             }
-
         }
 
         @Override
@@ -378,7 +376,7 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
         @Nullable
         private final String clientXml;
         @Nonnull
-        private final FunctionEx<? super HazelcastInstance, ? extends EventJournalReader<E>>
+        private final FunctionEx<String, hz3bridge.EventJournalReader<T>>
                 eventJournalReaderSupplier;
         @Nonnull
         private final PredicateEx<? super E> predicate;
@@ -390,12 +388,12 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
         private final EventTimePolicy<? super T> eventTimePolicy;
 
         private transient HazelcastInstance client;
-        private transient EventJournalReader<E> eventJournalReader;
+        private transient hz3bridge.EventJournalReader<T> eventJournalReader;
 
         ClusterProcessorSupplier(
                 @Nonnull List<Integer> ownedPartitions,
                 @Nullable String clientXml,
-                @Nonnull FunctionEx<? super HazelcastInstance, ? extends EventJournalReader<E>>
+                @Nonnull FunctionEx<String, hz3bridge.EventJournalReader<T>>
                         eventJournalReaderSupplier,
                 @Nonnull PredicateEx<? super E> predicate,
                 @Nonnull FunctionEx<? super E, ? extends T> projection,
@@ -413,12 +411,7 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
 
         @Override
         public void init(@Nonnull Context context) {
-            HazelcastInstance instance = context.jetInstance().getHazelcastInstance();
-            if (clientXml != null) {
-                client = newHazelcastClient(asClientConfig(clientXml));
-                instance = client;
-            }
-            eventJournalReader = eventJournalReaderSupplier.apply(instance);
+            eventJournalReader = eventJournalReaderSupplier.apply(clientXml);
         }
 
         @Override
@@ -448,7 +441,7 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
     @SuppressWarnings("unchecked")
     public static <K, V, T> ProcessorMetaSupplier streamRemoteMapSupplier(
             @Nonnull String mapName,
-            @Nonnull ClientConfig clientConfig,
+            @Nonnull String clientConfigXml,
             @Nonnull PredicateEx<? super EventJournalMapEvent<K, V>> predicate,
             @Nonnull FunctionEx<? super EventJournalMapEvent<K, V>, ? extends T> projection,
             @Nonnull JournalInitialPosition initialPos,
@@ -456,8 +449,8 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
         checkSerializable(predicate, "predicate");
         checkSerializable(projection, "projection");
 
-        return new ClusterMetaSupplier<>(clientConfig,
-                instance -> (EventJournalReader<EventJournalMapEvent<K, V>>) instance.getMap(mapName),
+        return new ClusterMetaSupplier<>(clientConfigXml,
+                config -> new EventJournalReader<>(config, mapName),
                 predicate, projection, initialPos, eventTimePolicy);
     }
 }

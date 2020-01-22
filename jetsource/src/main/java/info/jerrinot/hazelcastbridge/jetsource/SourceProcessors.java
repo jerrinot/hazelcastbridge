@@ -18,24 +18,24 @@ public final class SourceProcessors {
     @Nonnull
     public static <K, V> ProcessorMetaSupplier streamRemoteMapP(
             @Nonnull String mapName,
-            @Nonnull ClientConfig clientConfig,
+            @Nonnull String clientConfigXml,
             @Nonnull JournalInitialPosition initialPos,
             @Nonnull EventTimePolicy<? super Map.Entry<K, V>> eventTimePolicy
     ) {
-        return streamRemoteMapP(mapName, clientConfig, mapPutEvents(), mapEventToEntry(), initialPos,
+        return streamRemoteMapP(mapName, clientConfigXml, mapPutEvents(), mapEventToEntry(), initialPos,
                 eventTimePolicy);
     }
 
     @Nonnull
     public static <T, K, V> ProcessorMetaSupplier streamRemoteMapP(
             @Nonnull String mapName,
-            @Nonnull ClientConfig clientConfig,
+            @Nonnull String clientConfigXml,
             @Nonnull PredicateEx<? super EventJournalMapEvent<K, V>> predicateFn,
             @Nonnull FunctionEx<? super EventJournalMapEvent<K, V>, ? extends T> projectionFn,
             @Nonnull JournalInitialPosition initialPos,
             @Nonnull EventTimePolicy<? super T> eventTimePolicy
     ) {
         return StreamEventJournalP.streamRemoteMapSupplier(
-                mapName, clientConfig, predicateFn, projectionFn, initialPos, eventTimePolicy);
+                mapName, clientConfigXml, predicateFn, projectionFn, initialPos, eventTimePolicy);
     }
 }

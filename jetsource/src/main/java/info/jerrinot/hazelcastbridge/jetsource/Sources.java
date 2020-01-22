@@ -15,19 +15,19 @@ import java.util.function.Function;
 
 public final class Sources {
     @Nonnull
-    public static <T, K, V> StreamSource<T> remoteMapJournal(
+    public static <T, K, V> StreamSource<T> iMap3Journal(
             @Nonnull String mapName,
-            @Nonnull ClientConfig clientConfig,
+            @Nonnull String clientConfigXml,
             @Nonnull JournalInitialPosition initialPos,
             @Nonnull FunctionEx<? super EventJournalMapEvent<K, V>, ? extends T> projectionFn,
             @Nonnull PredicateEx<? super EventJournalMapEvent<K, V>> predicateFn
     ) {
         return streamFromProcessorWithWatermarks("remoteMapJournalSource(" + mapName + ')',
-                false, w -> SourceProcessors.streamRemoteMapP(mapName, clientConfig, predicateFn, projectionFn, initialPos, w));
+                false, w -> SourceProcessors.streamRemoteMapP(mapName, clientConfigXml, predicateFn, projectionFn, initialPos, w));
     }
 
     @Nonnull
-    public static <T> StreamSource<T> streamFromProcessorWithWatermarks(
+    private static <T> StreamSource<T> streamFromProcessorWithWatermarks(
             @Nonnull String sourceName,
             boolean supportsNativeTimestamps,
             @Nonnull Function<EventTimePolicy<? super T>, ProcessorMetaSupplier> metaSupplierFn
