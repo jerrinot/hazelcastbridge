@@ -18,13 +18,11 @@ package info.jerrinot.hazelcastbridge.jetsource;
 
 import bridge.com.hazelcast.core.ICompletableFuture;
 import bridge.com.hazelcast.internal.journal.EventJournalInitialSubscriberState;
+import bridge.com.hazelcast.map.journal.EventJournalMapEvent;
 import bridge.com.hazelcast.ringbuffer.ReadResultSet;
-import com.hazelcast.client.config.ClientConfig;
-import com.hazelcast.client.impl.clientside.HazelcastClientProxy;
 import com.hazelcast.cluster.Address;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.function.FunctionEx;
-import com.hazelcast.function.PredicateEx;
 import com.hazelcast.jet.JetException;
 import com.hazelcast.jet.Traverser;
 import com.hazelcast.jet.Traversers;
@@ -38,9 +36,8 @@ import com.hazelcast.jet.core.ProcessorSupplier;
 import com.hazelcast.jet.core.processor.Processors;
 import com.hazelcast.jet.core.processor.SourceProcessors;
 import com.hazelcast.jet.pipeline.JournalInitialPosition;
-import com.hazelcast.map.EventJournalMapEvent;
 import com.hazelcast.nio.serialization.HazelcastSerializationException;
-import hz3bridge.EventJournalReader;
+import hz3bridge.EventJournal3Reader;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
@@ -48,25 +45,17 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
-import java.util.function.Predicate;
 import java.util.stream.IntStream;
 
-import static com.hazelcast.client.HazelcastClient.newHazelcastClient;
 import static com.hazelcast.jet.Traversers.traverseStream;
 import static com.hazelcast.jet.Util.entry;
 import static com.hazelcast.jet.core.BroadcastKey.broadcastKey;
 import static com.hazelcast.jet.impl.util.ExceptionUtil.peel;
 import static com.hazelcast.jet.impl.util.ExceptionUtil.rethrow;
-import static com.hazelcast.jet.impl.util.ImdgUtil.asClientConfig;
-import static com.hazelcast.jet.impl.util.ImdgUtil.asXmlString;
-import static com.hazelcast.jet.impl.util.ImdgUtil.maybeUnwrapImdgFunction;
-import static com.hazelcast.jet.impl.util.ImdgUtil.maybeUnwrapImdgPredicate;
 import static com.hazelcast.jet.impl.util.LoggingUtil.logFinest;
 import static com.hazelcast.jet.impl.util.Util.arrayIndexOf;
-import static com.hazelcast.jet.impl.util.Util.checkSerializable;
 import static com.hazelcast.jet.impl.util.Util.distributeObjects;
 import static com.hazelcast.jet.pipeline.JournalInitialPosition.START_FROM_CURRENT;
 import static java.util.stream.Collectors.groupingBy;
@@ -76,22 +65,18 @@ import static java.util.stream.IntStream.range;
 /**
  * @see SourceProcessors#streamMapP
  */
-public final class StreamEventJournalP<E, T> extends AbstractProcessor {
+public final class StreamEventJournalP<K, V> extends AbstractProcessor {
 
     private static final int MAX_FETCH_SIZE = 128;
 
     @Nonnull
-    private final hz3bridge.EventJournalReader<T> eventJournalReader;
-    @Nonnull
-    private final Predicate<? super E> predicate;
-    @Nonnull
-    private final Function<? super E, ? extends T> projection;
+    private final EventJournal3Reader<K, V> eventJournalReader;
     @Nonnull
     private final JournalInitialPosition initialPos;
     @Nonnull
     private final int[] partitionIds;
     @Nonnull
-    private final EventTimeMapper<? super T> eventTimeMapper;
+    private final EventTimeMapper<EventJournalMapEvent<K, V>> eventTimeMapper;
 
     // keep track of next offset to emit and read separately, as even when the
     // outbox is full we can still poll for new items.
@@ -101,11 +86,11 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
     @Nonnull
     private final long[] readOffsets;
 
-    private ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<? extends T>>[] readFutures;
+    private ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<EventJournalMapEvent<K, V>>>[] readFutures;
 
     // currently processed resultSet, it's partitionId and iterating position
     @Nullable
-    private ReadResultSet<? extends T> resultSet;
+    private ReadResultSet<EventJournalMapEvent<K, V>> resultSet;
     private int currentPartitionIndex = -1;
     private int resultSetPosition;
 
@@ -113,16 +98,12 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
     private Traverser<Object> traverser = Traversers.empty();
 
     StreamEventJournalP(
-            @Nonnull hz3bridge.EventJournalReader<T> eventJournalReader,
+            @Nonnull EventJournal3Reader<K, V> eventJournalReader,
             @Nonnull List<Integer> assignedPartitions,
-            @Nonnull PredicateEx<? super E> predicateFn,
-            @Nonnull FunctionEx<? super E, ? extends T> projectionFn,
             @Nonnull JournalInitialPosition initialPos,
-            @Nonnull EventTimePolicy<? super T> eventTimePolicy
+            @Nonnull EventTimePolicy<? super EventJournalMapEvent<K, V>> eventTimePolicy
     ) {
         this.eventJournalReader = eventJournalReader;
-        this.predicate = maybeUnwrapImdgPredicate(predicateFn);
-        this.projection = maybeUnwrapImdgFunction(projectionFn);
         this.initialPos = initialPos;
 
         partitionIds = assignedPartitions.stream().mapToInt(Integer::intValue).toArray();
@@ -175,7 +156,7 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
     private void emitResultSet() {
         assert resultSet != null : "null resultSet";
         while (resultSetPosition < resultSet.size()) {
-            T event = resultSet.get(resultSetPosition);
+            EventJournalMapEvent<K, V> event = resultSet.get(resultSetPosition);
             emitOffsets[currentPartitionIndex] = resultSet.getSequence(resultSetPosition) + 1;
             resultSetPosition++;
             if (event != null) {
@@ -253,7 +234,7 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
 
     private void tryGetNextResultSet() {
         while (resultSet == null && ++currentPartitionIndex < partitionIds.length) {
-            ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<? extends T>> future = readFutures[currentPartitionIndex];
+            ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<EventJournalMapEvent<K, V>>> future = readFutures[currentPartitionIndex];
             if (!future.isDone()) {
                 continue;
             }
@@ -282,7 +263,7 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
         }
     }
 
-    private bridge.com.hazelcast.ringbuffer.ReadResultSet<? extends T> toResultSet(ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<? extends T>> future) {
+    private bridge.com.hazelcast.ringbuffer.ReadResultSet<EventJournalMapEvent<K, V>> toResultSet(ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<EventJournalMapEvent<K, V>>> future) {
         try {
             return future.get();
         } catch (ExecutionException e) {
@@ -299,38 +280,32 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
         }
     }
 
-    private ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<? extends T>> readFromJournal(int partition, long offset) {
+    private ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<EventJournalMapEvent<K, V>>> readFromJournal(int partition, long offset) {
         return eventJournalReader.readFromEventJournal(offset, 1, MAX_FETCH_SIZE, partition);
     }
 
-    private static class ClusterMetaSupplier<E, T> implements ProcessorMetaSupplier {
+    private static class ClusterMetaSupplier<K, V> implements ProcessorMetaSupplier {
 
         static final long serialVersionUID = 1L;
 
         private final String clientXml;
-        private final FunctionEx<String, hz3bridge.EventJournalReader<T>>
+        private final FunctionEx<String, EventJournal3Reader<K, V>>
                 eventJournalReaderSupplier;
-        private final PredicateEx<? super E> predicate;
-        private final FunctionEx<? super E, ? extends T> projection;
         private final JournalInitialPosition initialPos;
-        private final EventTimePolicy<? super T> eventTimePolicy;
+        private final EventTimePolicy<? super EventJournalMapEvent<K, V>> eventTimePolicy;
 
         private transient int remotePartitionCount;
         private transient Map<Address, List<Integer>> addrToPartitions;
 
         ClusterMetaSupplier(
                 @Nullable String clientConfigXml,
-                @Nonnull FunctionEx<String, hz3bridge.EventJournalReader<T>>
+                @Nonnull FunctionEx<String, EventJournal3Reader<K, V>>
                         eventJournalReaderSupplier,
-                @Nonnull PredicateEx<? super E> predicate,
-                @Nonnull FunctionEx<? super E, ? extends T> projection,
                 @Nonnull JournalInitialPosition initialPos,
-                @Nonnull EventTimePolicy<? super T> eventTimePolicy
+                @Nonnull EventTimePolicy<? super EventJournalMapEvent<K, V>> eventTimePolicy
         ) {
             this.clientXml = clientConfigXml;
             this.eventJournalReaderSupplier = eventJournalReaderSupplier;
-            this.predicate = predicate;
-            this.projection = projection;
             this.initialPos = initialPos;
             this.eventTimePolicy = eventTimePolicy;
         }
@@ -343,7 +318,7 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
         @Override
         public void init(@Nonnull Context context) {
             assert clientXml != null;
-            hz3bridge.EventJournalReader reader = eventJournalReaderSupplier.apply(clientXml);
+            EventJournal3Reader<K, V> reader = eventJournalReaderSupplier.apply(clientXml);
             try {
                 remotePartitionCount = reader.getPartitionCount();
             } finally {
@@ -362,12 +337,11 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
             }
 
             return address -> new ClusterProcessorSupplier<>(addrToPartitions.get(address),
-                    clientXml, eventJournalReaderSupplier, predicate, projection, initialPos,
-                    eventTimePolicy);
+                    clientXml, eventJournalReaderSupplier, initialPos, eventTimePolicy);
         }
     }
 
-    private static class ClusterProcessorSupplier<E, T> implements ProcessorSupplier {
+    private static class ClusterProcessorSupplier<K, V> implements ProcessorSupplier {
 
         static final long serialVersionUID = 1L;
 
@@ -376,35 +350,27 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
         @Nullable
         private final String clientXml;
         @Nonnull
-        private final FunctionEx<String, hz3bridge.EventJournalReader<T>>
+        private final FunctionEx<String, EventJournal3Reader<K, V>>
                 eventJournalReaderSupplier;
-        @Nonnull
-        private final PredicateEx<? super E> predicate;
-        @Nonnull
-        private final FunctionEx<? super E, ? extends T> projection;
         @Nonnull
         private final JournalInitialPosition initialPos;
         @Nonnull
-        private final EventTimePolicy<? super T> eventTimePolicy;
+        private final EventTimePolicy<? super EventJournalMapEvent<K, V>> eventTimePolicy;
 
         private transient HazelcastInstance client;
-        private transient hz3bridge.EventJournalReader<T> eventJournalReader;
+        private transient EventJournal3Reader<K, V> eventJournalReader;
 
         ClusterProcessorSupplier(
                 @Nonnull List<Integer> ownedPartitions,
                 @Nullable String clientXml,
-                @Nonnull FunctionEx<String, hz3bridge.EventJournalReader<T>>
+                @Nonnull FunctionEx<String, EventJournal3Reader<K, V>>
                         eventJournalReaderSupplier,
-                @Nonnull PredicateEx<? super E> predicate,
-                @Nonnull FunctionEx<? super E, ? extends T> projection,
                 @Nonnull JournalInitialPosition initialPos,
-                @Nonnull EventTimePolicy<? super T> eventTimePolicy
+                @Nonnull EventTimePolicy<? super EventJournalMapEvent<K, V>> eventTimePolicy
         ) {
             this.ownedPartitions = ownedPartitions;
             this.clientXml = clientXml;
             this.eventJournalReaderSupplier = eventJournalReaderSupplier;
-            this.predicate = predicate;
-            this.projection = projection;
             this.initialPos = initialPos;
             this.eventTimePolicy = eventTimePolicy;
         }
@@ -433,24 +399,19 @@ public final class StreamEventJournalP<E, T> extends AbstractProcessor {
         private Processor processorForPartitions(List<Integer> partitions) {
             return partitions.isEmpty()
                     ? Processors.noopP().get()
-                    : new StreamEventJournalP<>(eventJournalReader, partitions, predicate, projection,
-                    initialPos, eventTimePolicy);
+                    : new StreamEventJournalP<>(eventJournalReader, partitions, initialPos, eventTimePolicy);
         }
     }
 
     @SuppressWarnings("unchecked")
-    public static <K, V, T> ProcessorMetaSupplier streamRemoteMapSupplier(
+    public static <K, V> ProcessorMetaSupplier streamRemoteMapSupplier(
             @Nonnull String mapName,
             @Nonnull String clientConfigXml,
-            @Nonnull PredicateEx<? super EventJournalMapEvent<K, V>> predicate,
-            @Nonnull FunctionEx<? super EventJournalMapEvent<K, V>, ? extends T> projection,
             @Nonnull JournalInitialPosition initialPos,
-            @Nonnull EventTimePolicy<? super T> eventTimePolicy) {
-        checkSerializable(predicate, "predicate");
-        checkSerializable(projection, "projection");
+            @Nonnull EventTimePolicy<? super EventJournalMapEvent<K, V>> eventTimePolicy) {
 
         return new ClusterMetaSupplier<>(clientConfigXml,
-                config -> new EventJournalReader<>(config, mapName),
-                predicate, projection, initialPos, eventTimePolicy);
+                config -> new EventJournal3Reader<>(config, mapName),
+                initialPos, eventTimePolicy);
     }
 }

@@ -1,5 +1,6 @@
 package info.jerrinot.hazelcastbridge.jetsource;
 
+import bridge.com.hazelcast.map.journal.EventJournalMapEvent;
 import com.hazelcast.jet.Jet;
 import com.hazelcast.jet.JetInstance;
 import com.hazelcast.jet.pipeline.Pipeline;
@@ -44,7 +45,7 @@ public class End2EndTest {
     public static void main(String[] args) {
         Pipeline pipeline = Pipeline.create();
 
-        StreamSource<Object> myMap = Sources.iMap3Journal("myMap", CLIENT_XML, START_FROM_CURRENT, null, null);
+        StreamSource<EventJournalMapEvent<Integer, String>> myMap = Hazelcast3Sources.mapJournal("myMap", CLIENT_XML, START_FROM_CURRENT);
         pipeline.readFrom(myMap)
                 .withIngestionTimestamps()
                 .writeTo(logger());
