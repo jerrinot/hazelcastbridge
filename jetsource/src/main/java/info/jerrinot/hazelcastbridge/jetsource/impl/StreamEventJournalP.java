@@ -38,7 +38,7 @@ import com.hazelcast.jet.core.processor.SourceProcessors;
 import com.hazelcast.jet.pipeline.JournalInitialPosition;
 import com.hazelcast.map.EventJournalMapEvent;
 import com.hazelcast.nio.serialization.HazelcastSerializationException;
-import hz3bridge.EventJournal3Reader;
+import info.jerrinot.hazelcastbridge.hz3bridge.EventJournal3Reader;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
