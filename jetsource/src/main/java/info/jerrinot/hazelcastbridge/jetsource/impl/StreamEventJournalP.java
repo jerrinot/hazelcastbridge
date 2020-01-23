@@ -14,13 +14,13 @@
  * limitations under the License.
  */
 
-package info.jerrinot.hazelcastbridge.jetsource;
+package info.jerrinot.hazelcastbridge.jetsource.impl;
 
 import bridge.com.hazelcast.core.ICompletableFuture;
 import bridge.com.hazelcast.internal.journal.EventJournalInitialSubscriberState;
-import bridge.com.hazelcast.map.journal.EventJournalMapEvent;
 import bridge.com.hazelcast.ringbuffer.ReadResultSet;
 import com.hazelcast.cluster.Address;
+import com.hazelcast.core.EntryEventType;
 import com.hazelcast.core.HazelcastInstance;
 import com.hazelcast.function.FunctionEx;
 import com.hazelcast.jet.JetException;
@@ -36,6 +36,7 @@ import com.hazelcast.jet.core.ProcessorSupplier;
 import com.hazelcast.jet.core.processor.Processors;
 import com.hazelcast.jet.core.processor.SourceProcessors;
 import com.hazelcast.jet.pipeline.JournalInitialPosition;
+import com.hazelcast.map.EventJournalMapEvent;
 import com.hazelcast.nio.serialization.HazelcastSerializationException;
 import hz3bridge.EventJournal3Reader;
 
@@ -86,11 +87,11 @@ public final class StreamEventJournalP<K, V> extends AbstractProcessor {
     @Nonnull
     private final long[] readOffsets;
 
-    private ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<EventJournalMapEvent<K, V>>>[] readFutures;
+    private ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<bridge.com.hazelcast.map.journal.EventJournalMapEvent<K, V>>>[] readFutures;
 
     // currently processed resultSet, it's partitionId and iterating position
     @Nullable
-    private ReadResultSet<EventJournalMapEvent<K, V>> resultSet;
+    private ReadResultSet<bridge.com.hazelcast.map.journal.EventJournalMapEvent<K, V>> resultSet;
     private int currentPartitionIndex = -1;
     private int resultSetPosition;
 
@@ -156,13 +157,16 @@ public final class StreamEventJournalP<K, V> extends AbstractProcessor {
     private void emitResultSet() {
         assert resultSet != null : "null resultSet";
         while (resultSetPosition < resultSet.size()) {
-            EventJournalMapEvent<K, V> event = resultSet.get(resultSetPosition);
+            bridge.com.hazelcast.map.journal.EventJournalMapEvent<K, V> event = resultSet.get(resultSetPosition);
             emitOffsets[currentPartitionIndex] = resultSet.getSequence(resultSetPosition) + 1;
             resultSetPosition++;
             if (event != null) {
+                EntryEventType hz4EventType = EntryEventType.getByType(event.getType().getType());
+                com.hazelcast.map.EventJournalMapEvent<K, V> hz4Event = new BridgeEventJournalMapEvent<>(event.getKey(), event.getOldValue(), event.getNewValue(), hz4EventType);
+
                 // Always use partition index of 0, treating all the partitions the
                 // same for coalescing purposes.
-                traverser = eventTimeMapper.flatMapEvent(event, 0, EventTimeMapper.NO_NATIVE_TIME);
+                traverser = eventTimeMapper.flatMapEvent(hz4Event, 0, EventTimeMapper.NO_NATIVE_TIME);
                 if (!emitFromTraverser(traverser)) {
                     return;
                 }
@@ -234,7 +238,7 @@ public final class StreamEventJournalP<K, V> extends AbstractProcessor {
 
     private void tryGetNextResultSet() {
         while (resultSet == null && ++currentPartitionIndex < partitionIds.length) {
-            ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<EventJournalMapEvent<K, V>>> future = readFutures[currentPartitionIndex];
+            ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<bridge.com.hazelcast.map.journal.EventJournalMapEvent<K, V>>> future = readFutures[currentPartitionIndex];
             if (!future.isDone()) {
                 continue;
             }
@@ -263,7 +267,7 @@ public final class StreamEventJournalP<K, V> extends AbstractProcessor {
         }
     }
 
-    private bridge.com.hazelcast.ringbuffer.ReadResultSet<EventJournalMapEvent<K, V>> toResultSet(ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<EventJournalMapEvent<K, V>>> future) {
+    private bridge.com.hazelcast.ringbuffer.ReadResultSet<bridge.com.hazelcast.map.journal.EventJournalMapEvent<K, V>> toResultSet(ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<bridge.com.hazelcast.map.journal.EventJournalMapEvent<K, V>>> future) {
         try {
             return future.get();
         } catch (ExecutionException e) {
@@ -280,7 +284,7 @@ public final class StreamEventJournalP<K, V> extends AbstractProcessor {
         }
     }
 
-    private ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<EventJournalMapEvent<K, V>>> readFromJournal(int partition, long offset) {
+    private ICompletableFuture<? extends bridge.com.hazelcast.ringbuffer.ReadResultSet<bridge.com.hazelcast.map.journal.EventJournalMapEvent<K, V>>> readFromJournal(int partition, long offset) {
         return eventJournalReader.readFromEventJournal(offset, 1, MAX_FETCH_SIZE, partition);
     }
 

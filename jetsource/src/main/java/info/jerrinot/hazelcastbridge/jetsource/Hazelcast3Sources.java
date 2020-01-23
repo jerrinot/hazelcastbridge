@@ -1,11 +1,12 @@
 package info.jerrinot.hazelcastbridge.jetsource;
 
-import bridge.com.hazelcast.map.journal.EventJournalMapEvent;
 import com.hazelcast.jet.core.EventTimePolicy;
 import com.hazelcast.jet.core.ProcessorMetaSupplier;
 import com.hazelcast.jet.impl.pipeline.transform.StreamSourceTransform;
 import com.hazelcast.jet.pipeline.JournalInitialPosition;
 import com.hazelcast.jet.pipeline.StreamSource;
+import com.hazelcast.map.EventJournalMapEvent;
+import info.jerrinot.hazelcastbridge.jetsource.impl.StreamEventJournalP;
 
 import javax.annotation.Nonnull;
 import java.util.function.Function;
@@ -18,7 +19,7 @@ public final class Hazelcast3Sources {
             @Nonnull JournalInitialPosition initialPos
     ) {
         return streamFromProcessorWithWatermarks("remoteMap3JournalSource(" + mapName + ')',
-                w -> SourceProcessors.streamRemoteMapP(mapName, clientConfigXml, initialPos, w));
+                w -> StreamEventJournalP.streamRemoteMapSupplier(mapName, clientConfigXml, initialPos, w));
     }
 
     @Nonnull
