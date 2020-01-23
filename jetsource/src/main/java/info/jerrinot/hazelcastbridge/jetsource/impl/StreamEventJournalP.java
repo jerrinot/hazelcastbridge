@@ -316,7 +316,7 @@ public final class StreamEventJournalP<K, V> extends AbstractProcessor {
 
         @Override
         public int preferredLocalParallelism() {
-            return clientXml != null ? 1 : 2;
+            return 1;
         }
 
         @Override
