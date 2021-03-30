@@ -1,5 +1,6 @@
 package info.jerrinot.hazelcastbridge.jetsource;
 
+import com.hazelcast.function.FunctionEx;
 import com.hazelcast.jet.core.EventTimePolicy;
 import com.hazelcast.jet.core.ProcessorMetaSupplier;
 import com.hazelcast.jet.impl.pipeline.transform.StreamSourceTransform;
@@ -25,7 +26,7 @@ public final class Hazelcast3Sources {
     @Nonnull
     private static <T> StreamSource<T> streamFromProcessorWithWatermarks(
             @Nonnull String sourceName,
-            @Nonnull Function<? super EventTimePolicy<? super T>, ? extends ProcessorMetaSupplier> metaSupplierFn
+            @Nonnull FunctionEx<? super EventTimePolicy<? super T>, ? extends ProcessorMetaSupplier> metaSupplierFn
     ) {
         return new StreamSourceTransform<T>(sourceName, metaSupplierFn, true, false);
     }

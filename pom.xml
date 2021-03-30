@@ -20,9 +20,9 @@
             <version>75b951cf4dc9e</version>
         </dependency>
         <dependency>
-            <groupId>com.hazelcast.jet</groupId>
-            <artifactId>hazelcast-jet</artifactId>
-            <version>4.0-SNAPSHOT</version>
+            <groupId>com.hazelcast</groupId>
+            <artifactId>hazelcast</artifactId>
+            <version>5.0-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
         <dependency>

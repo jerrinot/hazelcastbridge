@@ -1,12 +1,12 @@
 package info.jerrinot.hazelcastbridge.jetsource;
 
-import com.hazelcast.jet.Jet;
+import com.hazelcast.core.Hazelcast;
+
 import com.hazelcast.jet.JetInstance;
 import com.hazelcast.jet.pipeline.Pipeline;
 import com.hazelcast.jet.pipeline.StreamSource;
 import com.hazelcast.map.EventJournalMapEvent;
 
-import static com.hazelcast.jet.pipeline.JournalInitialPosition.START_FROM_CURRENT;
 import static com.hazelcast.jet.pipeline.JournalInitialPosition.START_FROM_OLDEST;
 import static com.hazelcast.jet.pipeline.Sinks.logger;
 
@@ -20,7 +20,7 @@ public class End2EndTest {
                 .withIngestionTimestamps()
                 .writeTo(logger());
 
-        JetInstance jetInstance = Jet.newJetInstance();
+        JetInstance jetInstance = Hazelcast.newHazelcastInstance().getJetInstance();
         jetInstance.newJob(pipeline).join();
     }
 }
