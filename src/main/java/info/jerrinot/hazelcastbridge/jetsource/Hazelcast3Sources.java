@@ -21,7 +21,7 @@ public final class Hazelcast3Sources {
     public static StreamSource<Data> queue(@Nonnull String queueName,
                                            @Nonnull String clientConfigXml) {
 
-        return SourceBuilder.stream("remoteQueue3Source", c -> new QueueContextObject(queueName, clientConfigXml))
+        return SourceBuilder.stream("remoteQueue3Source", c -> new QueueContextObject(clientConfigXml, queueName))
                 .<Data>fillBufferFn((c, b) -> b.add(new HeapData(c.takeBytes())))
                 .build();
     }
