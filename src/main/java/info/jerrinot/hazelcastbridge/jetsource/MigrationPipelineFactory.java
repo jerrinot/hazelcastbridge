@@ -1,6 +1,7 @@
 package info.jerrinot.hazelcastbridge.jetsource;
 
 import com.hazelcast.internal.serialization.Data;
+import com.hazelcast.jet.core.metrics.Metrics;
 import com.hazelcast.jet.pipeline.Pipeline;
 import com.hazelcast.jet.pipeline.Sink;
 import com.hazelcast.jet.pipeline.SinkBuilder;
@@ -13,7 +14,10 @@ public final class MigrationPipelineFactory {
         StreamSource<Data> queueSrc = Hazelcast3Sources.queue(sourceQueueName, sourceXmlConfig);
 
         Sink<Object> queueSink = SinkBuilder.sinkBuilder("dst-queue-sink", c -> c.jetInstance().getHazelcastInstance().getQueue(destinationQueueName))
-                .receiveFn(BlockingQueue::offer)
+                .receiveFn((objects, e) -> {
+                    objects.offer(e);
+                    Metrics.metric("offered").increment();
+                })
                 .build();
 
         Pipeline pipeline = Pipeline.create();

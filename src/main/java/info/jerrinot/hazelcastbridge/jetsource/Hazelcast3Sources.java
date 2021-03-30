@@ -5,6 +5,7 @@ import com.hazelcast.internal.serialization.Data;
 import com.hazelcast.internal.serialization.impl.HeapData;
 import com.hazelcast.jet.core.EventTimePolicy;
 import com.hazelcast.jet.core.ProcessorMetaSupplier;
+import com.hazelcast.jet.core.metrics.Metrics;
 import com.hazelcast.jet.impl.pipeline.transform.StreamSourceTransform;
 import com.hazelcast.jet.pipeline.JournalInitialPosition;
 import com.hazelcast.jet.pipeline.SourceBuilder;
@@ -22,7 +23,11 @@ public final class Hazelcast3Sources {
                                            @Nonnull String clientConfigXml) {
 
         return SourceBuilder.stream("remoteQueue3Source", c -> new QueueContextObject(clientConfigXml, queueName))
-                .<Data>fillBufferFn((c, b) -> b.add(new HeapData(c.takeBytes())))
+                .<Data>fillBufferFn((c, b) -> {
+                    byte[] blob = c.takeBytes();
+                    Metrics.metric("taken").increment();
+                    b.add(new HeapData(blob));
+                })
                 .build();
     }
 
