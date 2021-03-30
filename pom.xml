@@ -17,7 +17,7 @@
         <dependency>
             <groupId>com.github.jerrinot</groupId>
             <artifactId>hzbridge3</artifactId>
-            <version>master-SNAPSHOT</version>
+            <version>e7f7f7a</version>
         </dependency>
         <dependency>
             <groupId>com.hazelcast</groupId>

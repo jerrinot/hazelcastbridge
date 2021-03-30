@@ -16,11 +16,11 @@ import javax.annotation.Nonnull;
 public final class Hazelcast3Sources {
 
     @Nonnull
-    public static <T> StreamSource<T> queue(@Nonnull String queueName,
+    public static StreamSource<byte[]> queue(@Nonnull String queueName,
                                             @Nonnull String clientConfigXml) {
 
-        return SourceBuilder.stream("remoteQueue3Source", c -> new QueueContextObject<T>(queueName, clientConfigXml))
-                .<T>fillBufferFn((c, b) -> b.add(c.take()))
+        return SourceBuilder.stream("remoteQueue3Source", c -> new QueueContextObject(queueName, clientConfigXml))
+                .<byte[]>fillBufferFn((c, b) -> b.add(c.takeBytes()))
                 .build();
     }
 
