@@ -5,14 +5,25 @@ import com.hazelcast.jet.core.EventTimePolicy;
 import com.hazelcast.jet.core.ProcessorMetaSupplier;
 import com.hazelcast.jet.impl.pipeline.transform.StreamSourceTransform;
 import com.hazelcast.jet.pipeline.JournalInitialPosition;
+import com.hazelcast.jet.pipeline.SourceBuilder;
 import com.hazelcast.jet.pipeline.StreamSource;
 import com.hazelcast.map.EventJournalMapEvent;
+import info.jerrinot.hazelcastbridge.hz3bridge.QueueContextObject;
 import info.jerrinot.hazelcastbridge.jetsource.impl.StreamEventJournalP;
 
 import javax.annotation.Nonnull;
-import java.util.function.Function;
 
 public final class Hazelcast3Sources {
+
+    @Nonnull
+    public static <T> StreamSource<T> queue(@Nonnull String queueName,
+                                            @Nonnull String clientConfigXml) {
+
+        return SourceBuilder.stream("remoteQueue3Source", c -> new QueueContextObject<T>(queueName, clientConfigXml))
+                .<T>fillBufferFn((c, b) -> b.add(c.take()))
+                .build();
+    }
+
     @Nonnull
     public static <K, V> StreamSource<EventJournalMapEvent<K, V>> mapJournal(
             @Nonnull String mapName,
